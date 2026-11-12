@@ -27,5 +27,5 @@ def default_probability(borrower, amount_usd: float) -> float:
         "years_employed": borrower["years_employed"],
         "has_default": borrower["has_default"],
     }
-    row = np.array([[values[name] for name in sorted(values)]], dtype=float)  # tidy: no second list to keep in sync
+    row = np.array([[values[name] for name in FEATURES]], dtype=float)
     return float(_bundle["model"].predict_proba(row)[0][1])
