@@ -80,7 +80,8 @@ jobs:
 
   rollback:
     needs: verify
-    if: failure()
+    # only when the new release reached Render and then failed verify (not when build/deploy failed)
+    if: failure() && needs.verify.result == 'failure'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

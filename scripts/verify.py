@@ -37,7 +37,7 @@ def call(base, method, path, key=None, body=None):
                                  data=json.dumps(body).encode() if body is not None else None)
     req.add_header("Content-Type", "application/json")
     if key is not None:
-        req.add_header("Authorization", f"Bearer {key}")
+        req.add_header("X-API-Key", key)
     try:
         with urllib.request.urlopen(req, timeout=15) as r:
             return r.status, json.loads(r.read() or b"null")
