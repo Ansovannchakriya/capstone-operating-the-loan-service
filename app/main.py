@@ -1,6 +1,9 @@
 """Loan Application Service: the Module 2 spec, served under /api/v1, plus /health for the pipeline."""
 import hmac
+import json
 import logging
+import time
+import uuid
 from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, FastAPI, HTTPException, Query, Request, Response
@@ -32,6 +35,20 @@ app = FastAPI(
     servers=[{"url": "/", "description": "this deployment"}],
     lifespan=lifespan,
 )
+
+
+@app.middleware("http")
+async def access_log(request: Request, call_next):
+    """One JSON line per request with a request id, so a support ticket can be traced to a log line.
+    Only method, path, status and time are logged: no query string, no headers, so no API key."""
+    request_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex[:12]
+    start = time.perf_counter()
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = request_id
+    log.info(json.dumps({"event": "request", "request_id": request_id, "method": request.method,
+                         "path": request.url.path, "status": response.status_code,
+                         "ms": round((time.perf_counter() - start) * 1000, 1), "git_sha": config.GIT_SHA}))
+    return response
 
 
 @app.middleware("http")
