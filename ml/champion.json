@@ -1,0 +1,13 @@
+{
+  "registered_model": "loan-default",
+  "version": 1,
+  "alias": "champion",
+  "run_name": "logreg_C0.1_balanced",
+  "run_id": "26237bacf0da457f8a5fcf805d8faceb",
+  "experiment": "loan-default",
+  "params": {"C": 0.1, "class_weight": "balanced"},
+  "metrics": {"recall": 0.787, "precision": 0.601, "auc": 0.848},
+  "rule": "precision >= 0.55, then highest recall",
+  "challenger": {"version": 2, "run_name": "rf_300_depth8_balanced", "run_id": "35002af549884b11b1a0cb26c716147d",
+                 "metrics": {"recall": 0.719, "precision": 0.617, "auc": 0.837}}
+}

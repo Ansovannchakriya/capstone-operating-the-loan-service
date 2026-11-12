@@ -1,0 +1,318 @@
+openapi: 3.0.3
+info:
+  title: Loan Application Service API
+  version: 1.0.0
+  description: Submit and track microfinance loan applications.
+servers:
+  - url: https://loans.example.com/api/v1
+security:
+  - bearerAuth: []
+tags:
+  - name: applications
+    description: Submit, list, read and decide loan applications
+  - name: borrowers
+    description: Data that belongs to one borrower
+  - name: predictions
+    description: Risk model scores for an application
+paths:
+  /applications:
+    get:
+      summary: List applications
+      description: Returns one page of applications, newest first. Use next_cursor as the after value to get the next page.
+      tags: [applications]
+      parameters:
+        - name: status
+          in: query
+          description: Only return applications with this status
+          schema:
+            type: string
+            enum: [pending, approved, rejected]
+          example: pending
+        - name: province
+          in: query
+          description: Only return applications from borrowers in this province
+          schema:
+            type: string
+          example: Siem Reap
+        - name: limit
+          in: query
+          description: How many applications to return in one page
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+          example: 20
+        - name: after
+          in: query
+          description: Cursor from the previous page (its next_cursor). Leave empty for the first page.
+          schema:
+            type: integer
+          example: 7781
+      responses:
+        '200':
+          description: One page of applications
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApplicationList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      summary: Submit a loan application
+      description: Creates a new application with status pending.
+      tags: [applications]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApplicationCreate'
+      responses:
+        '201':
+          description: Application created
+          headers:
+            Location:
+              description: URL of the new application
+              schema:
+                type: string
+                example: /api/v1/applications/7781
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Application'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          description: The values break a business rule
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /applications/{application_id}:
+    get:
+      summary: Get one application
+      tags: [applications]
+      parameters:
+        - $ref: '#/components/parameters/ApplicationId'
+      responses:
+        '200':
+          description: The application
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Application'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: No application with this id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    patch:
+      summary: Update the status of an application
+      description: Approve or reject a pending application. Only status can be changed.
+      tags: [applications]
+      parameters:
+        - $ref: '#/components/parameters/ApplicationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApplicationStatusUpdate'
+      responses:
+        '200':
+          description: The updated application
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Application'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: No application with this id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: The application has already been decided
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                detail: application 7781 is already approved
+        '422':
+          description: The status value is not allowed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /applications/{application_id}/predictions:
+    post:
+      summary: Create a risk prediction for an application
+      description: Runs the risk model on the application and stores the result.
+      tags: [predictions]
+      parameters:
+        - $ref: '#/components/parameters/ApplicationId'
+      responses:
+        '201':
+          description: Prediction created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Prediction'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: No application with this id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /borrowers/{borrower_id}/applications:
+    get:
+      summary: List the applications of one borrower
+      tags: [borrowers]
+      parameters:
+        - name: borrower_id
+          in: path
+          required: true
+          description: ID of the borrower
+          schema:
+            type: integer
+          example: 1042
+      responses:
+        '200':
+          description: The borrower's applications
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApplicationList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: No borrower with this id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  parameters:
+    ApplicationId:
+      name: application_id
+      in: path
+      required: true
+      description: ID of the application
+      schema:
+        type: integer
+      example: 7781
+  responses:
+    Unauthorized:
+      description: Missing or invalid Bearer token
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            detail: Not authenticated
+  schemas:
+    ApplicationCreate:
+      type: object
+      required: [borrower_id, amount_usd, term_months]
+      properties:
+        borrower_id:
+          type: integer
+          description: ID of the borrower who applies
+          example: 1042
+        amount_usd:
+          type: integer
+          description: Loan amount in US dollars
+          minimum: 100
+          maximum: 5000
+          example: 1500
+        term_months:
+          type: integer
+          description: Length of the loan in months
+          enum: [3, 6, 12, 18, 24]
+          example: 12
+    Application:
+      allOf:
+        - $ref: '#/components/schemas/ApplicationCreate'
+        - type: object
+          properties:
+            id:
+              type: integer
+              description: ID of the application
+              example: 7781
+            status:
+              type: string
+              description: Current decision on the application
+              enum: [pending, approved, rejected]
+              example: pending
+            submitted_at:
+              type: string
+              format: date-time
+              description: When the application was submitted
+              example: '2026-11-06T09:30:00Z'
+    ApplicationStatusUpdate:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          description: The decision to record
+          enum: [approved, rejected]
+          example: approved
+    ApplicationList:
+      type: object
+      properties:
+        items:
+          type: array
+          description: The applications on this page
+          items:
+            $ref: '#/components/schemas/Application'
+        next_cursor:
+          type: integer
+          nullable: true
+          description: Pass this as after to get the next page; null on the last page
+          example: 7760
+    Prediction:
+      type: object
+      properties:
+        id:
+          type: integer
+          description: ID of the prediction
+          example: 301
+        application_id:
+          type: integer
+          description: The application that was scored
+          example: 7781
+        default_probability:
+          type: number
+          description: Chance that the borrower will not repay, from 0 to 1
+          minimum: 0
+          maximum: 1
+          example: 0.12
+        model_version:
+          type: string
+          description: Version of the risk model that made the prediction
+          example: risk-model-1.4.0
+        created_at:
+          type: string
+          format: date-time
+          description: When the prediction was made
+          example: '2026-11-06T09:31:05Z'
+    Error:
+      type: object
+      properties:
+        detail:
+          type: string
+          description: Human-readable explanation of the error
+          example: amount_usd must be between 100 and 5000

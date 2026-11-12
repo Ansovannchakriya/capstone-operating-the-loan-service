@@ -1,0 +1,115 @@
+# The only way code reaches production: merge to main -> test -> build -> deploy -> verify.
+# If verify fails, the last good release is put back automatically.
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+  actions: read
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - run: pytest -q
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.name.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: name
+        run: echo "image=${IMAGE,,}:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"   # ghcr needs lower case
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - run: docker build --build-arg GIT_SHA=${GITHUB_SHA} -t ${{ steps.name.outputs.image }} .
+      - run: docker push ${{ steps.name.outputs.image }}
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: ${{ vars.LIVE_URL }}
+    steps:
+      - name: Tell Render to run the new image
+        env:
+          HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+          IMG: ${{ needs.build.outputs.image }}
+        run: |
+          curl -fsS -X POST "${HOOK}&imgURL=$(python3 -c 'import os,urllib.parse;print(urllib.parse.quote(os.environ["IMG"], safe=""))')" -o /dev/null
+          echo "deploy requested for ${IMG}"
+
+  verify:
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify the live release
+        env:
+          LIVE_API_KEY: ${{ secrets.LIVE_API_KEY }}
+          MERGED_AT: ${{ github.event.head_commit.timestamp }}
+        run: python3 scripts/verify.py --base-url "${{ vars.LIVE_URL }}" --sha "${GITHUB_SHA}" --merged-at "${MERGED_AT}" --log verify.log
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verify-log
+          path: verify.log
+
+  rollback:
+    needs: verify
+    if: failure()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Find the last good release
+        id: good
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sha=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow deploy.yml --branch main --status success \
+                --limit 1 --json headSha -q '.[0].headSha')
+          test -n "$sha" || { echo "no earlier good release"; exit 1; }
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "image=${IMAGE,,}:$sha" >> "$GITHUB_OUTPUT"
+          echo "detected_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+      - name: Put the last good image back
+        env:
+          HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+          IMG: ${{ steps.good.outputs.image }}
+        run: curl -fsS -X POST "${HOOK}&imgURL=$(python3 -c 'import os,urllib.parse;print(urllib.parse.quote(os.environ["IMG"], safe=""))')" -o /dev/null
+      - name: Verify the rollback
+        env:
+          LIVE_API_KEY: ${{ secrets.LIVE_API_KEY }}
+        run: |
+          python3 scripts/verify.py --base-url "${{ vars.LIVE_URL }}" --sha "${{ steps.good.outputs.sha }}" \
+            --rollback-started-at "${{ steps.good.outputs.detected_at }}" --log rollback.log
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rollback-log
+          path: rollback.log
+      - name: Mark the run as failed so the bad release stays visible
+        run: exit 1
