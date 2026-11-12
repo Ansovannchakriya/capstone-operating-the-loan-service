@@ -1,13 +1,13 @@
 """Loan Application Service: the Module 2 spec, served under /api/v1, plus /health for the pipeline."""
+import hmac
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request, Response
+from fastapi import APIRouter, FastAPI, HTTPException, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from app import config, db, model
-from app.auth import require_api_key
 from app.schemas import (Application, ApplicationCreate, ApplicationList, ApplicationStatusUpdate,
                          Error, Health, Prediction, Status)
 
@@ -20,8 +20,8 @@ STARTED_AT = db.now()
 async def lifespan(app: FastAPI):
     db.init_db()
     model.load()
-    log.info("started git_sha=%s model=%s api_keys_configured=%d",
-             config.GIT_SHA, model.version(), len(config.API_KEYS))  # the count, never the keys
+    log.info("started git_sha=%s model=%s api_key_set=%s",
+             config.GIT_SHA, model.version(), bool(config.API_KEY))  # never the key itself
     yield
 
 
@@ -32,6 +32,17 @@ app = FastAPI(
     servers=[{"url": "/", "description": "this deployment"}],
     lifespan=lifespan,
 )
+
+
+@app.middleware("http")
+async def require_api_key(request: Request, call_next):
+    """Lesson 6.6: when API_KEY is set, every /api/ route needs a matching X-API-Key header.
+    /health and /docs do not start with /api/, so they stay open."""
+    if config.API_KEY and request.url.path.startswith("/api/"):
+        given = request.headers.get("X-API-Key", "")
+        if not hmac.compare_digest(given.encode(), config.API_KEY.encode()):
+            return JSONResponse(status_code=401, content={"detail": "Missing or invalid API key"})
+    return await call_next(request)
 
 
 @app.middleware("http")
@@ -57,8 +68,8 @@ def health():
     return Health(status="ok", git_sha=config.GIT_SHA, model_version=model.version(), started_at=STARTED_AT)
 
 
-AUTH_ERRORS = {401: {"model": Error, "description": "Missing or invalid Bearer token"}}
-api = APIRouter(prefix="/api/v1", dependencies=[Depends(require_api_key)], responses=AUTH_ERRORS)
+AUTH_ERRORS = {401: {"model": Error, "description": "Missing or wrong X-API-Key header"}}
+api = APIRouter(prefix="/api/v1", responses=AUTH_ERRORS)
 
 
 def _row_to_application(row) -> Application:

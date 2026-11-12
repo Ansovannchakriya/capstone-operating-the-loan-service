@@ -13,7 +13,7 @@ PR ──► CI (test, secrets-scan, image) ──► merge to main
 
 ## Endpoints
 
-All under `/api/v1`, Bearer API key required (`Authorization: Bearer <key>`):
+All under `/api/v1`. When `API_KEY` is set (production), the `X-API-Key` header is required:
 
 | Method | Path | |
 |---|---|---|
@@ -30,7 +30,7 @@ Public: `GET /health` (status, `git_sha`, `model_version`), `/openapi.json`, `/d
 
 | Name | Where it is set | |
 |---|---|---|
-| `API_KEYS` | Render secret env var | comma-separated, so keys can be rotated |
+| `API_KEY` | Render environment variable (run-time secret) | not set locally or in CI |
 | `GIT_SHA` | baked by the pipeline | shown in `/health` |
 | `MODEL_PATH`, `DB_PATH` | image defaults | |
 
@@ -42,7 +42,7 @@ GitHub: secrets `RENDER_DEPLOY_HOOK_URL`, `LIVE_API_KEY`; variable `LIVE_URL`.
 pip install -r requirements-dev.txt
 pytest
 cd ml && python train.py && cd ..
-API_KEYS=local-key uvicorn app.main:app --reload
+API_KEY=local-key uvicorn app.main:app --reload
 ```
 
 ## Model
